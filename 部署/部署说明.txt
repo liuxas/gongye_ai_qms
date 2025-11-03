@@ -1,0 +1,9 @@
+部署要求：
+硬件：nvidia GPU  大于20G
+部署步骤
+第一步：
+docker build  -t hk:v1.0 -f Dockerfile .
+第二步：
+docker run --gpus all   --shm-size 32g  --restart=always --env x-ai-token=gcs-c7b485c0-ad2a-49ac-90a9-c8bf5f11b48f --env HK_API_URL=http://10.5.100.172:8080/v1/chat/completions  --env x-user-code=006xxxx --env x-ai-port=5079 -v /home/nvisual/liux/hkc:/sgl-workspace/sglang/hkc  -p 5079:5079 -p 30000:30000 -p 7860:7860 -p 8000:8000   --ipc=host   -itd hk:v1.0 /bin/bash -c "pip3 install --ignore-installed -r /sgl-workspace/sglang/hkc/requirements.txt && python3 /sgl-workspace/sglang/hkc/Production_env/app_main.py"
+调用（参考）：
+/home/liux/文档/项目/惠科/hkc/test.py

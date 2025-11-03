@@ -1,0 +1,6 @@
+flask
+loguru
+pandas
+requests
+regex
+numpy==2.2

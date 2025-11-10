@@ -2,6 +2,7 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "2,3"
 import json
 from flask import Flask, request, jsonify
+from ipdb  import set_trace
 from loguru import logger
 import pandas as pd
 from typing import List, Dict, Any
@@ -13,14 +14,13 @@ import re
 import pdb
 import sys
 logger = logging.getLogger(__name__)
-from ipdb  import set_trace
 
 # 导入自定义类
 from qms.pdf_markdown_extractor import SpecificationExtractor
 
-# log_file = open("./log_output.log","w",encoding="utf-8")
-# sys.stdout = log_file
-# sys.stderr = log_file
+log_file = open("/sgl-workspace/sglang/hkc/Production_env/log_output.log","w",encoding="utf-8")
+sys.stdout = log_file
+sys.stderr = log_file
 
 app = Flask(__name__)
 
@@ -63,6 +63,7 @@ def process_specification():
                     return jsonify({'error': f'第{i+1}个项目缺少必需字段: {missing_fields}'}), 400
             
             check_pro = spec_data
+            map_pro = create_inspection_mapping(spec_data)
             check_pro = remove_key_from_list_dicts(check_pro, "项目代码")
             fix_program_list = [item["检验项目"] for item in check_pro]
             fix_program = any("雾度" in s for s in fix_program_list )
@@ -82,7 +83,11 @@ def process_specification():
         # 从Markdown中提取值并填充规格表
         logger.info("开始提取检验项目值...")
         filled_check_pro = extractor.extract_values_from_markdown(pdf_file, optimize_markdown_content(md_content), check_pro,fix_program)
-    
+        #添加项目代码
+        filled_check_pro = complete_project_codes(filled_check_pro,map_pro)
+        #大于100000的值转化为科学计数
+        filled_check_pro = convert_large_numbers_to_scientific(filled_check_pro)
+
         # 返回结果
         return jsonify({
             'success': True,
@@ -171,6 +176,83 @@ def optimize_markdown_content(md_content: str) -> str:
     content = re.sub(r'\n{2,}', '\n\n', content)  # 压缩多余空行
     
     return content.strip()
+
+def create_inspection_mapping(data_list):
+    """
+    建立检验项目到项目代码的映射字典
+    
+    Args:
+        data_list: 包含检验项目数据的列表
+    
+    Returns:
+        dict: 检验项目到项目代码的映射字典
+    """
+    mapping = {}
+    for item in data_list:
+        project_code = item.get("项目代码")
+        inspection_item = item.get("检验项目")
+        if project_code and inspection_item:
+            mapping[inspection_item] = project_code
+    return mapping
+
+def complete_project_codes(data_list, mapping_dict):
+    """
+    根据映射字典为数据列表中缺失项目代码的项补充项目代码
+    
+    Args:
+        data_list: 需要处理的数据列表（可能某些项缺少项目代码）
+        mapping_dict: 检验项目到项目代码的映射字典
+    
+    Returns:
+        list: 处理后的数据列表
+    """
+    for item in data_list:
+        project_code = item.get("项目代码")
+        inspection_item = item.get("检验项目")
+        
+        # 如果有检验项目但没有项目代码，且该检验项目在映射字典中
+        if inspection_item and (not project_code or project_code == "") and inspection_item in mapping_dict:
+            item["项目代码"] = mapping_dict[inspection_item]
+    
+    return data_list
+
+def convert_large_numbers_to_scientific(data_list, threshold=100000):
+    """
+    将数据列表中上下限值大于阈值的数值转换为科学计数法（使用大写E）
+    
+    Args:
+        data_list: 包含检验项目信息的字典列表
+        threshold: 阈值，大于此值的数值将被转换为科学计数法，默认为100000
+    
+    Returns:
+        list: 转换后的数据列表
+    """
+    def convert_value(value):
+        """转换单个值为科学计数法（如果需要）"""
+        try:
+            # 排除无穷大、空值和非数值的情况
+            if value in ['∞', '', None] or not isinstance(value, str):
+                return value
+            
+            num = float(value)
+            if abs(num) > threshold:
+                # 使用大写E的科学计数法
+                return f"{num:.2E}"
+            else:
+                return value
+        except (ValueError, TypeError):
+            return value
+    
+    # 创建副本以避免修改原始数据
+    converted_list = []
+    for item in data_list:
+        converted_item = item.copy()
+        converted_item['上限'] = convert_value(converted_item['上限'])
+        converted_item['下限'] = convert_value(converted_item['下限'])
+        converted_list.append(converted_item)
+    
+    return converted_list
+
 
 if __name__ == '__main__':
     # 设置模型下载源（如果需要）
